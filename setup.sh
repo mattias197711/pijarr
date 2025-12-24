@@ -4,7 +4,7 @@ clear
 ### SET GLOBAL VARIABLES ###
 
 TEMPDIR="/tmp/pijarr"
-APPLIST="jackett sonarr lidarr radarr readarr prowlarr bazarr qbittorrent-nox"
+APPLIST="jackett sonarr lidarr radarr readarr prowlarr bazarr qbittorrent-nox flaresolverr"
 
 # Set terminal global variable for colors if supported.
 if [ -t 1 ]; then
@@ -182,6 +182,7 @@ readarr_src_url="http://readarr.servarr.com/v1/update/develop/updatefile?os=linu
 sonarr_src_url="https://services.sonarr.tv/v1/download/main/latest?version=4&os=linux&arch=${SERVARR_ARCH}"
 bazarr_src_url="https://github.com/morpheus65535/bazarr/releases/latest/download/bazarr.zip"
 qbittorrent_nox_src_url="Not applicable. Installed via apt."
+flaresolverr_src_url="https://github.com/FlareSolverr/FlareSolverr/archive/refs/tags/v3.4.6.tar.gz"
 
 check_sources() {
     task_info "Application Installation Source URLs"
@@ -268,7 +269,7 @@ pkg_remove() {
 # Function to install all the dependencies including packages and server keys.
 setup_dependencies() {
     task_info "Installing required dependencies..."
-    pkg_install curl unzip apt-transport-https dirmngr gnupg ca-certificates
+    pkg_install curl wget unzip apt-transport-https dirmngr gnupg ca-certificates
     task_info "Installing mono, sqlite3 and supporting libraries..."
     pkg_install mono-complete mediainfo sqlite3 libmono-cil-dev libchromaprint-tools
 }
@@ -282,6 +283,32 @@ setup_bazarr_dependencies() {
         # If installation fails, install the default python3-venv
         pkg_install python3-venv
     fi
+}
+
+setup_flaresolverr_dependencies() {
+    task_info "Installing required FlareSolverr dependencies..."
+    # Install Xvfb for headless browser display
+    pkg_install xvfb
+    # Install Python 3.13 from deadsnakes PPA
+    task_info "Adding deadsnakes PPA for Python 3.13..."
+    # Check if add-apt-repository command exists, if not try to install it
+    if ! command -v add-apt-repository >/dev/null 2>&1; then
+        task_info "Installing software-properties-common for add-apt-repository..."
+        apt update
+        apt install -y software-properties-common 2>/dev/null || {
+            task_warn "software-properties-common not available, trying manual PPA add..."
+            echo "deb http://ppa.launchpad.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes-ppa.list
+            apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
+        }
+    fi
+    # Try to add PPA if add-apt-repository is available
+    if command -v add-apt-repository >/dev/null 2>&1; then
+        add-apt-repository -y ppa:deadsnakes/ppa
+    fi
+    apt update
+    task_info "Installing Python 3.13 and venv..."
+    pkg_install python3.13 python3.13-venv python3.13-dev
+    # Chrome is already installed per user confirmation
 }
 
 # Function to output PiJARR ascii and details of script.
@@ -298,7 +325,7 @@ banner_info() {
 script_info() {
     banner_info
     printf '%s\n' "
-    Description:    Installer for Jackett, Sonarr, Radarr, Lidarr, Readarr, Prowler, and *Bazarr
+    Description:    Installer for Jackett, Sonarr, Radarr, Lidarr, Readarr, Prowler, *Bazarr, and *FlareSolverr
                     Tested with Raspberry Pi 3 & 4 running offical Raspberry Pi OS 64-Bit.
                     Compatibility with other Intel AMD x64 (64-bit only) Debian based Linux distros
 
@@ -308,6 +335,9 @@ script_info() {
 
                     *Bazarr requires Python3 and additional packages to be downloaded. It will be run
                     in a Python virtual environment (venv) to avoid dependency issues.
+
+                    *FlareSolverr requires Python 3.13 and Chrome/Chromium browser. It will be run
+                    in a Python virtual environment (venv) with Xvfb for headless browser operation.
 
                     Commands \"apt update upgrade autoclean autoremove\" will be run upon continue.
                     This is to ensure all packages are up to date and latest versions are used.
@@ -398,6 +428,22 @@ setup_app() {
             task_start "Deactivate Python venv..."
             deactivate
             check_result
+        elif [ "${app_name}" = "flaresolverr" ]; then
+            tar -xzf "${temp_dir}/${new_file}" -C "/opt/"
+            # GitHub release extracts to FlareSolverr-3.4.6 format, need to rename
+            mv /opt/FlareSolverr-* "${app_opt_path}"
+            task_info "Creating Python virtual environment (venv) for flaresolverr..."
+            python3.13 -m venv "${app_opt_path}/venv"
+            task_start "Activate Python venv for flaresolverr to install requirements..."
+            # /bin/sh alternative for source command
+            . "${app_opt_path}/venv/bin/activate"
+            check_result
+            task_info "Installing FlareSolverr Python import module requirements..."
+            pip install --upgrade pip
+            pip install -r "${app_opt_path}/requirements.txt"
+            task_start "Deactivate Python venv..."
+            deactivate
+            check_result
         else
             tar -xf "${temp_dir}/${new_file}" -C "/opt/"
         fi
@@ -419,12 +465,41 @@ setup_app() {
             app_exec="${app_opt_path}/$(title_case ${app_name}) -nobrowser -data=${app_lib_path}"
         elif [ "${app_name}" = "bazarr" ]; then
             app_exec="${app_opt_path}/venv/bin/python ${app_opt_path}/bazarr.py"
+        elif [ "${app_name}" = "flaresolverr" ]; then
+            app_exec="${app_opt_path}/venv/bin/python ${app_opt_path}/src/flaresolverr.py"
         else
             app_exec="${app_opt_path}/$(title_case ${app_name})"
         fi
         task_start "Writing service configuration file /etc/systemd/system/${app_name}.service..."
 
-        tee /etc/systemd/system/"${app_name}".service 1>/dev/null <<EOF
+        if [ "${app_name}" = "flaresolverr" ]; then
+            tee /etc/systemd/system/"${app_name}".service 1>/dev/null <<EOF
+# Generated by PiJARR ${date_stamp}
+[Unit]
+Description=$(title_case ${app_name}) Daemon
+After=syslog.target network.target
+
+[Service]
+WorkingDirectory=${app_opt_path}
+User=${app_user}
+Group=${app_group}
+UMask=0002
+Environment="DISPLAY=:99"
+SyslogIdentifier=${app_name}
+Restart=on-failure
+RestartSec=5
+Type=simple
+ExecStartPre=/bin/sh -c 'Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &'
+ExecStartPre=/bin/sleep 10
+ExecStart=${app_exec}
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        else
+            tee /etc/systemd/system/"${app_name}".service 1>/dev/null <<EOF
 # Generated by PiJARR ${date_stamp}
 [Unit]
 Description=$(title_case ${app_name}) Daemon
@@ -447,6 +522,7 @@ ExecStartPre=/bin/sleep 10
 [Install]
 WantedBy=multi-user.target
 EOF
+        fi
         check_result
         task_start "Reloading systemctl daemon..."
         systemctl daemon-reload 2>/dev/null
@@ -547,6 +623,8 @@ setup_qbittorrent_nox() {
     chown -R "${app_user}":"${app_group}" "${app_lib_path}" &&
     chmod 775 "${app_lib_path}"
     check_result
+    # Setup qBittorrent configuration with password before starting service
+    setup_qbittorrent_config "pijarr"
     task_start "Writing service configuration file /etc/systemd/system/${app_name}.service..."
     tee /etc/systemd/system/"${app_name}".service 1>/dev/null <<EOF
 # Generated by PiJARR ${date_stamp}
@@ -581,8 +659,70 @@ EOF
     check_result
     check_service "${app_name}"
     task_info "Completed install for ${app_name}\n"
-    task_info "Default qBittorrent username: admin password: adminadmin"
-    task_info "Default qBittorrent save directory /var/lib/qbittorrent-nox/Downloads"
+    task_info "${GREEN}═══════════════════════════════════════════════════════════════${RESET}"
+    task_info "${BOLD}qBittorrent WebUI Credentials:${RESET}"
+    task_info "  URL:      ${CYAN}http://$(hostname -I | awk '{print $1}'):8080${RESET}"
+    task_info "  Username: ${YELLOW}admin${RESET}"
+    task_info "  Password: ${YELLOW}pijarr${RESET}"
+    task_info ""
+    task_info "${RED}IMPORTANT:${RESET} Change this password immediately after first login!"
+    task_info "Downloads:  /var/lib/qbittorrent-nox/Downloads"
+    task_info "${GREEN}═══════════════════════════════════════════════════════════════${RESET}"
+}
+
+generate_qbittorrent_password_hash() {
+    local password="${1:-pijarr}"
+
+    # Use Python to generate PBKDF2 hash compatible with qBittorrent
+    python3 -c "
+import hashlib
+import os
+import base64
+
+password = '${password}'
+salt = os.urandom(16)
+iterations = 100000
+dk = hashlib.pbkdf2_hmac('sha512', password.encode(), salt, iterations)
+encoded_salt = base64.b64encode(salt).decode()
+encoded_hash = base64.b64encode(dk).decode()
+print(f'{encoded_salt}:{encoded_hash}')
+"
+}
+
+setup_qbittorrent_config() {
+    local app_user="qbittorrent-nox"
+    local config_dir="/var/lib/${app_user}/.config/qBittorrent"
+    local config_file="${config_dir}/qBittorrent.conf"
+    local password="${1:-pijarr}"
+
+    task_info "Configuring qBittorrent with default credentials..."
+
+    # Create config directory if it doesn't exist
+    mkdir -p "${config_dir}"
+
+    # Generate password hash
+    local password_hash=$(generate_qbittorrent_password_hash "${password}")
+
+    # Create qBittorrent.conf with WebUI password
+    cat > "${config_file}" <<EOF
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+WebUI\Username=admin
+WebUI\Password_PBKDF2="@ByteArray(${password_hash})"
+WebUI\Port=8080
+WebUI\LocalHostAuth=false
+
+[BitTorrent]
+Session\DefaultSavePath=/var/lib/qbittorrent-nox/Downloads
+EOF
+
+    # Set proper ownership
+    chown -R "${app_user}":"${app_user}" "${config_dir}"
+    chmod 600 "${config_file}"
+
+    task_pass "qBittorrent configuration file created"
 }
 
 remove_qbittorrent_nox() {
@@ -637,7 +777,8 @@ default_ports() {
     task_info "Readarr:         http://hostip:8787"
     task_info "Prowlarr:        http://hostip:9696"
     task_info "Bazarr:          http://hostip:6767"
-    task_info "qBittorrent-nox: http://hostip:8080"
+    task_info "FlareSolverr:    http://hostip:8191"
+    task_info "qBittorrent-nox: http://hostip:8080 (admin/pijarr)"
 }
 
 # Display a list of menu items for selection
@@ -648,7 +789,7 @@ display_menu() {
     echo " Menu Options "
     echo "=============="
     echo
-    printf "1.  Install ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr)\n"
+    printf "1.  Install ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr)\n"
     printf "2.  Install jackett only\n"
     printf "3.  Install sonarr only\n"
     printf "4.  Install lidarr only\n"
@@ -656,28 +797,30 @@ display_menu() {
     printf "6.  Install readarr only\n"
     printf "7.  Install prowlarr only\n"
     printf "8.  Install bazarr only\n"
-    printf "\n9.  Install qbittorrent-nox (headless BitTorrent client)\n"
-    printf "\n10. Remove ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr)\n"
-    printf "11. Remove jackett only\n"
-    printf "12. Remove sonarr only\n"
-    printf "13. Remove lidarr only\n"
-    printf "14. Remove radarr only\n"
-    printf "15. Remove readarr only\n"
-    printf "16. Remove prowlarr only\n"
-    printf "17. Remove bazarr only\n"
-    printf "\n18. Remove qbittorrent-nox\n"
-    printf "\n19. Show active services\n"
-    printf "20. Show application default ports\n"
-    printf "21. Show application source urls\n"
-    printf "\n22. Exit\n"
+    printf "9.  Install flaresolverr only\n"
+    printf "\n10. Install qbittorrent-nox (headless BitTorrent client)\n"
+    printf "\n11. Remove ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr)\n"
+    printf "12. Remove jackett only\n"
+    printf "13. Remove sonarr only\n"
+    printf "14. Remove lidarr only\n"
+    printf "15. Remove radarr only\n"
+    printf "16. Remove readarr only\n"
+    printf "17. Remove prowlarr only\n"
+    printf "18. Remove bazarr only\n"
+    printf "19. Remove flaresolverr only\n"
+    printf "\n20. Remove qbittorrent-nox\n"
+    printf "\n21. Show active services\n"
+    printf "22. Show application default ports\n"
+    printf "23. Show application source urls\n"
+    printf "\n24. Exit\n"
     echo
-    printf "    Enter option [1-22]: "
+    printf "    Enter option [1-24]: "
 
     while :; do
         read choice
         case ${choice} in
         1)
-            setup_app jackett sonarr lidarr radarr readarr prowlarr bazarr
+            setup_app jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr
             ;;
         2)
             setup_app jackett
@@ -701,48 +844,56 @@ display_menu() {
             setup_app bazarr
             ;;
         9)
-            setup_qbittorrent_nox
+            setup_dependencies
+            setup_flaresolverr_dependencies
+            setup_app flaresolverr
             ;;
         10)
-            remove_app jackett sonarr lidarr radarr readarr prowlarr bazarr
+            setup_qbittorrent_nox
             ;;
         11)
-            remove_app jackett
+            remove_app jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr
             ;;
         12)
-            remove_app sonarr
+            remove_app jackett
             ;;
         13)
-            remove_app lidarr
+            remove_app sonarr
             ;;
         14)
-            remove_app radarr
+            remove_app lidarr
             ;;
         15)
-            remove_app readarr
+            remove_app radarr
             ;;
         16)
-            remove_app prowlarr
+            remove_app readarr
             ;;
         17)
-            remove_app bazarr
+            remove_app prowlarr
             ;;
         18)
-            remove_qbittorrent_nox
+            remove_app bazarr
             ;;
         19)
-            clear
-            active_services
+            remove_app flaresolverr
             ;;
         20)
-            clear
-            default_ports
+            remove_qbittorrent_nox
             ;;
         21)
             clear
-            check_sources
+            active_services
             ;;
         22)
+            clear
+            default_ports
+            ;;
+        23)
+            clear
+            check_sources
+            ;;
+        24)
             printf "\nExiting...\n"
             exit
             ;;

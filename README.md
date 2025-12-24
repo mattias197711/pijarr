@@ -18,9 +18,12 @@ PiJARR streamlines the deployment of the following applications:
 - [**Readarr**](https://github.com/Readarr/Readarr): Manages ebook collections, catering to both Usenet and BitTorrent users.
 - [**Prowlarr**](https://github.com/Prowlarr/Prowlarr): Serves as an indexer manager/proxy, integrating with applications like Sonarr, Radarr, Lidarr, and Readarr.
 - [**Bazarr**](https://github.com/morpheus65535/bazarr): Enhances Sonarr and Radarr by managing and downloading subtitles.
+- [**FlareSolverr**](https://github.com/FlareSolverr/FlareSolverr): A proxy server to bypass Cloudflare and DDoS-GUARD protection, enabling access to protected torrent sites.
 
 ### LATEST UPDATE
 
+- [x] **FlareSolverr Integration**: Added FlareSolverr to bypass Cloudflare protection on torrent indexers. Runs in Python 3.13 virtual environment with Xvfb for headless browser operation.
+- [x] **qBittorrent Password Management**: Automatically configures qBittorrent with a secure default password (`admin`/`pijarr`) instead of relying on random temporary passwords. Fixes login issues with qBittorrent 4.6.1+.
 - [x] Added support for Sonarr v4.
 - [x] Integrated an installation option for qBittorrent-nox, a headless torrent client, defaulting to port 8080.
 - [x] Expanded functionality to include Bazarr installation.
@@ -31,17 +34,17 @@ PiJARR streamlines the deployment of the following applications:
 PiJARR has been tested in the following setups:
 
 ```terminal
-System OS.........: Debian GNU/Linux 12 (bookworm)
-System Kernel.....: 6.1.0-rpi7-rpi-v8
-System Arch.......: aarch64
-System Proc.......: Raspberry Pi 4
+System OS.........: Debian GNU/Linux 13 (trixie)
+System Kernel.....: 6.12.57-amd64
+System Arch.......: x86_64
+System Proc.......: Intel(R) Core(TM) i7
 ```
 
 ```terminal
 System OS.........: Debian GNU/Linux 12 (bookworm)
-System Kernel.....: 6.1.0-16-amd64
-System Arch.......: x86_64
-System Proc.......: Intel(R) Core(TM) i7
+System Kernel.....: 6.1.0-rpi7-rpi-v8
+System Arch.......: aarch64
+System Proc.......: Raspberry Pi 4
 ```
 
 #### Raspberry Pi testing version  
@@ -66,6 +69,10 @@ Debian version: 12 (bookworm)
 - **Installation Notes**: Larger dependencies, such as Mono, may appear to stall or hang during installation, especially on slower hardware like Raspberry Pi 3. However, they will eventually complete.
 
 - **Bazarr Dependencies**: Bazarr requires additional Python packages. It will be configured to run in a Python virtual environment (venv) to avoid dependency conflicts.
+
+- **FlareSolverr Dependencies**: FlareSolverr requires Python 3.13 and Chrome/Chromium browser. It will be configured to run in a Python virtual environment (venv) with Xvfb for headless browser operation. Python 3.13 is installed via the deadsnakes PPA.
+
+- **qBittorrent Default Password**: The script now automatically configures qBittorrent-nox with default credentials (`admin`/`pijarr`) to resolve login issues with qBittorrent 4.6.1+. **IMPORTANT**: Change this password immediately after your first login for security. You can change the password in the WebUI under Tools → Options → Web UI.
 
 - **Application Removal**: The removal script will delete everything in `/var/lib/{appname}` and `/opt/{appname}`. Please note that the removal process only works if the application was originally installed using the PiJARR script.
 
@@ -97,7 +104,7 @@ Below is an example of the menu options presented by the PiJARR script:
  Menu Options 
 ==============
 
-1.  Install ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr)
+1.  Install ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr)
 2.  Install jackett only
 3.  Install sonarr only
 4.  Install lidarr only
@@ -105,25 +112,28 @@ Below is an example of the menu options presented by the PiJARR script:
 6.  Install readarr only
 7.  Install prowlarr only
 8.  Install bazarr only
+9.  Install flaresolverr only
 
-9.  Install qbittorrent-nox (headless BitTorrent client)
+10. Install qbittorrent-nox (headless BitTorrent client)
 
-10. Remove ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr)
-11. Remove jackett only
-12. Remove sonarr only
-13. Remove lidarr only
-14. Remove radarr only
-15. Remove readarr only
-16. Remove prowlarr only
-17. Remove bazarr only
+11. Remove ALL (jackett sonarr lidarr radarr readarr prowlarr bazarr flaresolverr)
+12. Remove jackett only
+13. Remove sonarr only
+14. Remove lidarr only
+15. Remove radarr only
+16. Remove readarr only
+17. Remove prowlarr only
+18. Remove bazarr only
+19. Remove flaresolverr only
 
-18. Remove qbittorrent-nox
+20. Remove qbittorrent-nox
 
-19. Show active services
-20. Show application default ports
-21. Show application source urls
+21. Show active services
+22. Show application default ports
+23. Show application source urls
 
-22. Exit
+24. Exit
+
 ```
 
 ### DEFAULT APP PORT NUMBERS
@@ -138,8 +148,11 @@ Radarr:          http://hostip:7878
 Readarr:         http://hostip:8787
 Prowlarr:        http://hostip:9696
 Bazarr:          http://hostip:6767
-qBittorrent-nox: http://hostip:8080
+FlareSolverr:    http://hostip:8191
+qBittorrent-nox: http://hostip:8080 (admin/pijarr)
 ```
+
+**Note**: The qBittorrent-nox default credentials are `admin`/`pijarr`. Remember to change the password after your first login!
 
 ### USAGE
 
